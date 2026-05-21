@@ -1,6 +1,57 @@
-import { Ticket } from './types';
+import { Ticket, MockUser } from './types';
 
 export const INITIAL_TECHNICIANS = ['Carlos', 'Marta', 'Javier'];
+
+export const INITIAL_USERS: MockUser[] = [
+  {
+    id: 'USR-01',
+    name: 'Gastón Horvat',
+    email: 'gastonhorvat@gmail.com',
+    company: 'Acme Corp',
+    role: 'usuario',
+    status: 'Online',
+  },
+  {
+    id: 'USR-02',
+    name: 'Marta (Técnico)',
+    email: 'marta.soporte@ticketb2b.com',
+    company: 'Soporte Interno #02',
+    role: 'soporte',
+    status: 'Online',
+  },
+  {
+    id: 'USR-03',
+    name: 'Carlos (Técnico)',
+    email: 'carlos.soporte@ticketb2b.com',
+    company: 'Soporte Interno #01',
+    role: 'soporte',
+    status: 'Online',
+  },
+  {
+    id: 'USR-04',
+    name: 'Javier (Técnico)',
+    email: 'javier.soporte@ticketb2b.com',
+    company: 'Soporte Interno #03',
+    role: 'soporte',
+    status: 'Offline',
+  },
+  {
+    id: 'USR-05',
+    name: 'Administrador Principal',
+    email: 'chief.admin@ticketb2b.com',
+    company: 'Global IT Operations',
+    role: 'admin',
+    status: 'Online',
+  },
+  {
+    id: 'USR-06',
+    name: 'Client Globex',
+    email: 'client.globex@gmail.com',
+    company: 'Globex Inc',
+    role: 'usuario',
+    status: 'Offline',
+  }
+];
 
 export const INITIAL_TICKETS: Ticket[] = [
   {

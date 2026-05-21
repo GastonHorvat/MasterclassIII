@@ -27,3 +27,12 @@ export interface Ticket {
   createdAt: string;
   responses: TicketResponse[];
 }
+
+export interface MockUser {
+  id: string;
+  name: string;
+  email: string;
+  company: string;
+  role: UserRole;
+  status: 'Online' | 'Offline';
+}

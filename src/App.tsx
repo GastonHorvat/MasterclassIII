@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { UserRole, UserSession, Ticket, TicketResponse } from './types';
-import { INITIAL_TICKETS, INITIAL_TECHNICIANS } from './mockData';
+import { UserRole, UserSession, Ticket, TicketResponse, MockUser } from './types';
+import { INITIAL_TICKETS, INITIAL_TECHNICIANS, INITIAL_USERS } from './mockData';
 import LoginForm from './components/LoginForm';
 import UserPortal from './components/UserPortal';
 import SoporteDashboard from './components/SoporteDashboard';
 import AdminDashboard from './components/AdminDashboard';
+import UserManagement from './components/UserManagement';
 import { LogOut, SlidersHorizontal, Terminal, Shield, RefreshCw, LayoutGrid, MessageSquare, Users, Settings } from 'lucide-react';
 
 export default function App() {
@@ -13,15 +14,19 @@ export default function App() {
   const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
   const [isRoundRobinActive, setIsRoundRobinActive] = useState<boolean>(false);
   const [roundRobinIndex, setRoundRobinIndex] = useState<number>(0);
+  const [users, setUsers] = useState<MockUser[]>(INITIAL_USERS);
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users'>('dashboard');
 
   // Sync userRole with userSession when user registers/logs in
   const handleLoginSuccess = (newSession: UserSession) => {
     setSession(newSession);
     setUserRole(newSession.role);
+    setActiveAdminTab('dashboard');
   };
 
   const handleLogout = () => {
     setSession(null);
+    setActiveAdminTab('dashboard');
   };
 
   // Direct manual role-switching dropdown for interactive classroom demo
@@ -154,6 +159,39 @@ export default function App() {
     handleAddResponse(ticketId, `SISTEMA: El ingeniero de soporte [${techName}] tomó posesión de esta incidencia para asegurar la meta de SLA.`);
   };
 
+  // Mock User Management Callbacks
+  const handleUpdateUserRole = (userId: string, newRole: UserRole) => {
+    setUsers(prevUsers =>
+      prevUsers.map(u => (u.id === userId ? { ...u, role: newRole } : u))
+    );
+    // If updating the active developer session's email, propagate the forced role Live!
+    const targetUser = users.find(u => u.id === userId);
+    if (targetUser && session && targetUser.email.toLowerCase() === session.email.toLowerCase()) {
+      setUserRole(newRole);
+      setSession(prev => prev ? { ...prev, role: newRole } : null);
+    }
+  };
+
+  const handleUpdateUserStatus = (userId: string, newStatus: 'Online' | 'Offline') => {
+    setUsers(prevUsers =>
+      prevUsers.map(u => (u.id === userId ? { ...u, status: newStatus } : u))
+    );
+  };
+
+  const handleAddUser = (name: string, email: string, company: string, role: UserRole) => {
+    const nextIdNum = Math.max(...users.map(u => parseInt(u.id.replace('USR-', '')) || 0)) + 1;
+    const computedId = `USR-${nextIdNum < 10 ? '0' + nextIdNum : nextIdNum}`;
+    const newUser: MockUser = {
+      id: computedId,
+      name,
+      email,
+      company,
+      role,
+      status: 'Online'
+    };
+    setUsers(prev => [...prev, newUser]);
+  };
+
   // Render LoginForm if no session is active
   if (!session) {
     return <LoginForm onLoginSuccess={handleLoginSuccess} />;
@@ -214,15 +252,33 @@ export default function App() {
         
         {/* COMPACT LEFT SIDEBAR */}
         <aside className="hidden md:flex w-14 flex-col items-center py-4 gap-6 border-r border-slate-800 bg-zinc-950 shrink-0">
-          <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400 border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]">
+          <button
+            onClick={() => setActiveAdminTab('dashboard')}
+            className={`p-2 rounded-lg transition-all cursor-pointer ${
+              activeAdminTab === 'dashboard'
+                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+            title="Panel Control Principal"
+          >
             <LayoutGrid className="h-4 w-4" />
-          </div>
+          </button>
           <div className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer" title="Canales de Comunicación B2B">
             <MessageSquare className="h-4 w-4" />
           </div>
-          <div className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer" title="SLA Directorio">
-            <Users className="h-4 w-4" />
-          </div>
+          {userRole === 'admin' && (
+            <button
+              onClick={() => setActiveAdminTab('users')}
+              className={`p-2 rounded-lg transition-all cursor-pointer ${
+                activeAdminTab === 'users'
+                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title="Gestión de Usuarios y Roles"
+            >
+              <Users className="h-4 w-4" />
+            </button>
+          )}
           <div className="mt-auto text-slate-600 hover:text-slate-400 transition-colors cursor-pointer" title="Parámetros del Sistema">
             <Settings className="h-4 w-4" />
           </div>
@@ -252,12 +308,21 @@ export default function App() {
             {/* Dynamic CONDITIONAL View Render according to userRole */}
             <div className="animate-fadeIn">
               {userRole === 'admin' ? (
-                <AdminDashboard
-                  tickets={tickets}
-                  onReassignTicket={handleReassignTicket}
-                  isRoundRobinActive={isRoundRobinActive}
-                  onToggleRoundRobin={handleToggleRoundRobin}
-                />
+                activeAdminTab === 'users' ? (
+                  <UserManagement
+                    users={users}
+                    onUpdateUserRole={handleUpdateUserRole}
+                    onUpdateUserStatus={handleUpdateUserStatus}
+                    onAddUser={handleAddUser}
+                  />
+                ) : (
+                  <AdminDashboard
+                    tickets={tickets}
+                    onReassignTicket={handleReassignTicket}
+                    isRoundRobinActive={isRoundRobinActive}
+                    onToggleRoundRobin={handleToggleRoundRobin}
+                  />
+                )
               ) : userRole === 'soporte' ? (
                 <SoporteDashboard
                   session={session}
