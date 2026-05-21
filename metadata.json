@@ -1,0 +1,6 @@
+{
+  "name": "B2B Internal Ticket System",
+  "description": "Sistema de Tickets de Soporte Interno B2B interactivo para gestión corporativa, con panel de usuario, técnico de soporte y administrador.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
