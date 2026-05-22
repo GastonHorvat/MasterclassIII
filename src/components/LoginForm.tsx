@@ -131,6 +131,7 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
             }`}
             onClick={() => {
               setActiveTab('register');
+              setSelectedRole('usuario');
               setErrorMsg('');
             }}
           >
@@ -143,35 +144,39 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
         </div>
 
         {/* Preset quick buttons */}
-        <div className="mb-6">
-          <p className="text-xs font-mono uppercase tracking-wider text-slate-500 mb-2.5">
-            Presintonías de Usuario (Demostración Rápida)
-          </p>
-          <div className="grid grid-cols-1 gap-1.5">
-            {PRESETS.map((preset, idx) => (
-              <button
-                key={idx}
-                type="button"
-                className={`w-full py-2 px-3 text-xs rounded border text-left flex items-center justify-between font-mono transition-all uppercase ${preset.color}`}
-                onClick={() => handlePresetSelect(preset)}
-              >
-                <span>{preset.label}</span>
-                <span className="text-[10px] bg-zinc-800/80 px-1.5 py-0.5 rounded ml-2">
-                  {preset.role}
-                </span>
-              </button>
-            ))}
+        {activeTab === 'login' && (
+          <div className="mb-6">
+            <p className="text-xs font-mono uppercase tracking-wider text-slate-500 mb-2.5">
+              Presintonías de Usuario (Demostración Rápida)
+            </p>
+            <div className="grid grid-cols-1 gap-1.5">
+              {PRESETS.map((preset, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  className={`w-full py-2 px-3 text-xs rounded border text-left flex items-center justify-between font-mono transition-all uppercase ${preset.color}`}
+                  onClick={() => handlePresetSelect(preset)}
+                >
+                  <span>{preset.label}</span>
+                  <span className="text-[10px] bg-zinc-800/80 px-1.5 py-0.5 rounded ml-2">
+                    {preset.role}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="relative text-center my-4">
-          <div className="absolute inset-0 flex items-center" aria-hidden="true">
-            <div className="w-full border-t border-slate-800/80"></div>
+        {activeTab === 'login' && (
+          <div className="relative text-center my-4">
+            <div className="absolute inset-0 flex items-center" aria-hidden="true">
+              <div className="w-full border-t border-slate-800/80"></div>
+            </div>
+            <div className="relative flex justify-center text-xs uppercase font-mono">
+              <span className="bg-zinc-900 px-2 text-slate-500">O credenciales manuales</span>
+            </div>
           </div>
-          <div className="relative flex justify-center text-xs uppercase font-mono">
-            <span className="bg-zinc-900 px-2 text-slate-500">O credenciales manuales</span>
-          </div>
-        </div>
+        )}
 
         {/* Real-time interactive form */}
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -206,19 +211,6 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
                     className="w-full bg-slate-950 border border-slate-800 rounded pl-9 pr-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-sans transition-all"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono uppercase text-slate-400 mb-1">Rol Simulado de Destino</label>
-                <select
-                  value={selectedRole}
-                  onChange={(e) => setSelectedRole(e.target.value as UserRole)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-sans transition-all"
-                >
-                  <option value="usuario">Cliente B2B (usuario)</option>
-                  <option value="soporte">Técnico de Soporte (soporte)</option>
-                  <option value="admin">Administrador del Sistema (admin)</option>
-                </select>
               </div>
             </>
           )}
