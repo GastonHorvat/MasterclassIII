@@ -1,198 +1,506 @@
 import React, { useState, useEffect } from 'react';
-import { UserRole, UserSession, Ticket, TicketResponse, MockUser } from './types';
-import { INITIAL_TICKETS, INITIAL_TECHNICIANS, INITIAL_USERS } from './mockData';
+import { UserRole, UserSession, Ticket, MockUser } from './types';
 import LoginForm from './components/LoginForm';
 import UserPortal from './components/UserPortal';
 import SoporteDashboard from './components/SoporteDashboard';
 import AdminDashboard from './components/AdminDashboard';
 import UserManagement from './components/UserManagement';
-import { LogOut, SlidersHorizontal, Terminal, Shield, RefreshCw, LayoutGrid, MessageSquare, Users, Settings } from 'lucide-react';
+import { LogOut, Terminal, LayoutGrid, MessageSquare, Users, Settings } from 'lucide-react';
+import { supabase } from './supabase';
 
 export default function App() {
   const [session, setSession] = useState<UserSession | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('usuario');
-  const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [isRoundRobinActive, setIsRoundRobinActive] = useState<boolean>(false);
   const [roundRobinIndex, setRoundRobinIndex] = useState<number>(0);
-  const [users, setUsers] = useState<MockUser[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<MockUser[]>([]);
   const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users'>('dashboard');
 
-  // Sync userRole with userSession when user registers/logs in
+  // Verify and restore active Supabase Auth Session on mount
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { session: supabaseSession } } = await supabase.auth.getSession();
+      if (supabaseSession?.user) {
+        // Retrieve relational profile information
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('name, role, company_id')
+          .eq('id', supabaseSession.user.id)
+          .single();
+          
+        if (profile) {
+          let companyName = 'Empresa B2B';
+          if (profile.company_id) {
+            const { data: comp } = await supabase
+              .from('companies')
+              .select('name')
+              .eq('id', profile.company_id)
+              .single();
+            if (comp) {
+              companyName = comp.name;
+            }
+          }
+          
+          setSession({
+            id: supabaseSession.user.id,
+            username: profile.name,
+            email: supabaseSession.user.email || '',
+            company: companyName,
+            role: profile.role
+          });
+          setUserRole(profile.role);
+        }
+      }
+    };
+    
+    checkUser();
+  }, []);
+
+  // Fetch Tickets from database dynamically
+  const fetchTickets = async () => {
+    if (!session) return;
+    
+    let query = supabase
+      .from('tickets')
+      .select(`
+        id,
+        title,
+        description,
+        priority,
+        status,
+        created_at,
+        resolved_at,
+        client_company_id,
+        companies:client_company_id(name),
+        profiles:created_by_id(email, name),
+        assigned:assigned_to_id(name),
+        ticket_responses(
+          id,
+          response_text,
+          created_at,
+          profiles:author_id(name, role)
+        )
+      `);
+      
+    // Enforce Tenant Separation at API/Frontend level
+    if (userRole === 'usuario') {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', session.id)
+        .single();
+        
+      if (profile && profile.company_id) {
+        query = query.eq('client_company_id', profile.company_id);
+      }
+    }
+    
+    const { data, error } = await query.order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching tickets:', error);
+      return;
+    }
+    
+    if (data) {
+      const mappedTickets: Ticket[] = data.map((t: any) => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        priority: t.priority,
+        status: t.status,
+        clientCompany: t.companies?.name || 'Inquilino B2B',
+        assignedTo: t.assigned?.name || 'Sin Asignar',
+        createdBy: t.profiles?.email || t.profiles?.name || 'usuario@b2bclient.com',
+        createdAt: t.created_at,
+        responses: (t.ticket_responses || []).map((r: any) => ({
+          id: r.id,
+          author: r.profiles?.name || 'Soporte',
+          role: r.profiles?.role || 'soporte',
+          text: r.response_text,
+          createdAt: r.created_at
+        })).sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      }));
+      setTickets(mappedTickets);
+    }
+  };
+
+  // Fetch profiles/users list for Admin tab directory
+  const fetchUsers = async () => {
+    if (!session || userRole !== 'admin') return;
+    
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, name, email, role, status, company_id, companies(name)');
+      
+    if (error) {
+      console.error('Error fetching users:', error);
+      return;
+    }
+    
+    if (data) {
+      const mappedUsers: MockUser[] = data.map((u: any) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        company: u.companies?.name || 'Inquilino B2B',
+        role: u.role,
+        status: u.status === 'Online' ? 'Online' : 'Offline'
+      }));
+      setUsers(mappedUsers);
+    }
+  };
+
+  // Load Tickets and Directory upon session activation
+  useEffect(() => {
+    if (session) {
+      fetchTickets();
+      if (userRole === 'admin') {
+        fetchUsers();
+      }
+    }
+  }, [session, userRole]);
+
+  // Load Round Robin algorithm configurations from DB
+  useEffect(() => {
+    const fetchSettings = async () => {
+      if (!session) return;
+      
+      const { data } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'round_robin')
+        .single();
+        
+      if (data && data.value) {
+        const val = data.value as any;
+        setIsRoundRobinActive(!!val.active);
+        setRoundRobinIndex(val.last_tech_index || 0);
+      }
+    };
+    
+    fetchSettings();
+  }, [session]);
+
   const handleLoginSuccess = (newSession: UserSession) => {
     setSession(newSession);
     setUserRole(newSession.role);
     setActiveAdminTab('dashboard');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setSession(null);
+    setUserRole('usuario');
     setActiveAdminTab('dashboard');
   };
 
-  // Direct manual role-switching dropdown for interactive classroom demo
-  const handleForcedRoleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const forcedRole = e.target.value as UserRole;
-    setUserRole(forcedRole);
-    if (session) {
-      setSession({
-        ...session,
-        role: forcedRole,
-        // Optional placeholder adjustment to match company identity
-        company: forcedRole === 'usuario' ? 'Acme Corp' : forcedRole === 'soporte' ? 'Soporte Técnico #02' : 'Global IT Operations',
-        username: forcedRole === 'usuario' ? 'Gastón Horvat' : forcedRole === 'soporte' ? 'Marta' : 'Administrador Principal'
-      });
+  // Create Ticket Callback (Client auto-services)
+  const handleCreateTicket = async (title: string, description: string, priority: 'Alta' | 'Media' | 'Baja') => {
+    if (!session || !session.id) return;
+    
+    // 1. Resolve company_id
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('company_id')
+      .eq('id', session.id)
+      .single();
+      
+    if (!profile || !profile.company_id) return;
+
+    // 2. Transact insertion
+    const { data: newTicket, error } = await supabase
+      .from('tickets')
+      .insert({
+        title,
+        description,
+        priority,
+        status: 'Abierto',
+        client_company_id: profile.company_id,
+        created_by_id: session.id,
+        assigned_to_id: null
+      })
+      .select()
+      .single();
+      
+    if (error) {
+      console.error('Error creating ticket:', error);
+      return;
     }
-  };
-
-  // Create Ticket Callback (From UserPortal)
-  const handleCreateTicket = (title: string, description: string, priority: 'Alta' | 'Media' | 'Baja') => {
-    const nextIdNumber = Math.max(...tickets.map(t => parseInt(t.id.replace('TK-', '')) || 0)) + 1;
-    const computedId = `TK-${nextIdNumber}`;
-
-    let assignedTech = 'Sin Asignar';
-    let currentIdx = roundRobinIndex;
-
-    // Apply Round Robin distribution automatically if toggle switch is active
+    
+    // 3. Apply active Round Robin distribution in real-time
     if (isRoundRobinActive) {
-      assignedTech = INITIAL_TECHNICIANS[currentIdx];
-      currentIdx = (currentIdx + 1) % INITIAL_TECHNICIANS.length;
-      setRoundRobinIndex(currentIdx);
+      const { data: settings } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'round_robin')
+        .single();
+        
+      const val = settings?.value as any || { active: false, last_tech_index: 0 };
+      const lastTechIndex = val.last_tech_index || 0;
+      
+      const { data: techs } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .eq('role', 'soporte')
+        .order('name');
+        
+      if (techs && techs.length > 0) {
+        const nextIndex = (lastTechIndex + 1) % techs.length;
+        const assignedTech = techs[lastTechIndex];
+        
+        await supabase
+          .from('tickets')
+          .update({ assigned_to_id: assignedTech.id })
+          .eq('id', newTicket.id);
+          
+        await supabase
+          .from('system_settings')
+          .update({ value: { active: true, last_tech_index: nextIndex } })
+          .eq('key', 'round_robin');
+          
+        await supabase.from('ticket_responses').insert({
+          ticket_id: newTicket.id,
+          author_id: session.id,
+          response_text: `SISTEMA: Round Robin asignó automáticamente este incidente de forma óptima al ingeniero [${assignedTech.name}].`
+        });
+      }
     }
 
-    const newTicket: Ticket = {
-      id: computedId,
-      title,
-      description,
-      priority,
-      status: 'Abierto',
-      clientCompany: session?.company || 'Empresa Asociada B2B',
-      assignedTo: assignedTech,
-      createdBy: session?.email || 'anonimo@b2bclient.com',
-      createdAt: new Date().toISOString(),
-      responses: []
-    };
-
-    setTickets([newTicket, ...tickets]);
+    fetchTickets();
   };
 
-  // Assign ticket (From Admin Console / Round Robin Switch)
-  const handleReassignTicket = (ticketId: string, technician: string) => {
-    setTickets(prevTickets =>
-      prevTickets.map(tk =>
-        tk.id === ticketId ? { ...tk, assignedTo: technician } : tk
-      )
-    );
+  // Reassign ticket manually (Admin actions)
+  const handleReassignTicket = async (ticketId: string, technician: string) => {
+    if (!session || !session.id) return;
+    
+    let assignedToId = null;
+    if (technician !== 'Sin Asignar') {
+      const { data: tech } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('name', technician)
+        .eq('role', 'soporte')
+        .single();
+      if (tech) {
+        assignedToId = tech.id;
+      }
+    }
+    
+    const { error } = await supabase
+      .from('tickets')
+      .update({ assigned_to_id: assignedToId })
+      .eq('id', ticketId);
+      
+    if (error) {
+      console.error('Error reassigning ticket:', error);
+      return;
+    }
+    
+    await supabase.from('ticket_responses').insert({
+      ticket_id: ticketId,
+      author_id: session.id,
+      response_text: `SISTEMA: El administrador reasignó este incidente al ingeniero [${technician}].`
+    });
+    
+    fetchTickets();
   };
 
-  // Auto assign all "Sin Asignar" tickets when Round Robin is toggled ON
-  const handleToggleRoundRobin = (active: boolean) => {
+  // Toggle Round Robin algorithm dynamically on system_settings
+  const handleToggleRoundRobin = async (active: boolean) => {
+    const { error } = await supabase
+      .from('system_settings')
+      .update({ value: { active, last_tech_index: roundRobinIndex } })
+      .eq('key', 'round_robin');
+      
+    if (error) {
+      console.error('Error toggling round robin:', error);
+      return;
+    }
+    
     setIsRoundRobinActive(active);
+    
+    // Auto-distribute existing unassigned tickets upon activation
     if (active) {
-      let currentIdx = roundRobinIndex;
-      setTickets(prevTickets =>
-        prevTickets.map(tk => {
-          if (tk.assignedTo === 'Sin Asignar' || !tk.assignedTo) {
-            const assignedTech = INITIAL_TECHNICIANS[currentIdx];
-            currentIdx = (currentIdx + 1) % INITIAL_TECHNICIANS.length;
+      const { data: unassigned } = await supabase
+        .from('tickets')
+        .select('id')
+        .is('assigned_to_id', null);
+        
+      if (unassigned && unassigned.length > 0) {
+        const { data: techs } = await supabase
+          .from('profiles')
+          .select('id, name')
+          .eq('role', 'soporte')
+          .order('name');
+          
+        if (techs && techs.length > 0) {
+          let currentIdx = roundRobinIndex;
+          for (const tk of unassigned) {
+            const assignedTech = techs[currentIdx];
+            currentIdx = (currentIdx + 1) % techs.length;
             
-            // Generate system log thread
-            const roundRobinLog: TicketResponse = {
-              id: `RR-${Date.now()}-${Math.random()}`,
-              author: 'SISTEMA AUTOMÁTICO',
-              role: 'admin',
-              text: `SISTEMA: Round Robin asignó automáticamente este incidente de forma óptima al ingeniero [${assignedTech}].`,
-              createdAt: new Date().toISOString()
-            };
-
-            return {
-              ...tk,
-              assignedTo: assignedTech,
-              responses: [...tk.responses, roundRobinLog]
-            };
+            await supabase
+              .from('tickets')
+              .update({ assigned_to_id: assignedTech.id })
+              .eq('id', tk.id);
+              
+            await supabase.from('ticket_responses').insert({
+              ticket_id: tk.id,
+              author_id: session?.id || techs[0].id,
+              response_text: `SISTEMA: Round Robin asignó automáticamente este incidente de forma óptima al ingeniero [${assignedTech.name}].`
+            });
           }
-          return tk;
-        })
-      );
-      setRoundRobinIndex(currentIdx);
+          
+          setRoundRobinIndex(currentIdx);
+          await supabase
+            .from('system_settings')
+            .update({ value: { active, last_tech_index: currentIdx } })
+            .eq('key', 'round_robin');
+        }
+      }
     }
+    
+    fetchTickets();
   };
 
-  // Add communication message response (From both technician, client and admin)
-  const handleAddResponse = (ticketId: string, text: string) => {
-    if (!session) return;
-
-    const newResponse: TicketResponse = {
-      id: `R-${Date.now()}`,
-      author: session.username,
-      role: session.role,
-      text: text,
-      createdAt: new Date().toISOString()
-    };
-
-    setTickets(prevTickets =>
-      prevTickets.map(tk =>
-        tk.id === ticketId
-          ? { ...tk, responses: [...tk.responses, newResponse] }
-          : tk
-      )
-    );
+  // Add communication message response (thread updates)
+  const handleAddResponse = async (ticketId: string, text: string) => {
+    if (!session || !session.id) return;
+    
+    const { error } = await supabase.from('ticket_responses').insert({
+      ticket_id: ticketId,
+      author_id: session.id,
+      response_text: text
+    });
+    
+    if (error) {
+      console.error('Error adding response:', error);
+      return;
+    }
+    
+    fetchTickets();
   };
 
-  // Update status open/resolved
-  const handleUpdateStatus = (ticketId: string, status: 'Abierto' | 'Resuelto') => {
-    setTickets(prevTickets =>
-      prevTickets.map(tk =>
-        tk.id === ticketId ? { ...tk, status: status } : tk
-      )
-    );
+  // Update resolved/open status of a ticket
+  const handleUpdateStatus = async (ticketId: string, status: 'Abierto' | 'Resuelto') => {
+    const { error } = await supabase
+      .from('tickets')
+      .update({ status })
+      .eq('id', ticketId);
+      
+    if (error) {
+      console.error('Error updating status:', error);
+      return;
+    }
+    
+    fetchTickets();
   };
 
-  // Technical claim on unassigned tickets
-  const handleClaimTicket = (ticketId: string, techName: string) => {
-    setTickets(prevTickets =>
-      prevTickets.map(tk =>
-        tk.id === ticketId ? { ...tk, assignedTo: techName } : tk
-      )
-    );
-
-    // Automated audit thread response
-    handleAddResponse(ticketId, `SISTEMA: El ingeniero de soporte [${techName}] tomó posesión de esta incidencia para asegurar la meta de SLA.`);
+  // Claim unassigned ticket (Technical self-takeover)
+  const handleClaimTicket = async (ticketId: string, techName: string) => {
+    if (!session || !session.id) return;
+    
+    const { error } = await supabase
+      .from('tickets')
+      .update({ assigned_to_id: session.id })
+      .eq('id', ticketId);
+      
+    if (error) {
+      console.error('Error claiming ticket:', error);
+      return;
+    }
+    
+    await supabase.from('ticket_responses').insert({
+      ticket_id: ticketId,
+      author_id: session.id,
+      response_text: `SISTEMA: El ingeniero de soporte [${techName}] tomó posesión de esta incidencia para asegurar la meta de SLA.`
+    });
+    
+    fetchTickets();
   };
 
-  // Mock User Management Callbacks
-  const handleUpdateUserRole = (userId: string, newRole: UserRole) => {
-    setUsers(prevUsers =>
-      prevUsers.map(u => (u.id === userId ? { ...u, role: newRole } : u))
-    );
-    // If updating the active developer session's email, propagate the forced role Live!
-    const targetUser = users.find(u => u.id === userId);
-    if (targetUser && session && targetUser.email.toLowerCase() === session.email.toLowerCase()) {
+  // Directory user role update (Admin tab callbacks)
+  const handleUpdateUserRole = async (userId: string, newRole: UserRole) => {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: newRole })
+      .eq('id', userId);
+      
+    if (error) {
+      console.error('Error updating user role:', error);
+      return;
+    }
+    
+    fetchUsers();
+    
+    if (session && userId === session.id) {
       setUserRole(newRole);
       setSession(prev => prev ? { ...prev, role: newRole } : null);
     }
   };
 
-  const handleUpdateUserStatus = (userId: string, newStatus: 'Online' | 'Offline') => {
-    setUsers(prevUsers =>
-      prevUsers.map(u => (u.id === userId ? { ...u, status: newStatus } : u))
-    );
+  // Directory user status update (Admin tab callbacks)
+  const handleUpdateUserStatus = async (userId: string, newStatus: 'Online' | 'Offline') => {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ status: newStatus })
+      .eq('id', userId);
+      
+    if (error) {
+      console.error('Error updating user status:', error);
+      return;
+    }
+    
+    fetchUsers();
   };
 
-  const handleAddUser = (name: string, email: string, company: string, role: UserRole) => {
-    const nextIdNum = Math.max(...users.map(u => parseInt(u.id.replace('USR-', '')) || 0)) + 1;
-    const computedId = `USR-${nextIdNum < 10 ? '0' + nextIdNum : nextIdNum}`;
-    const newUser: MockUser = {
-      id: computedId,
+  // Directory user provision manually
+  const handleAddUser = async (name: string, email: string, company: string, role: UserRole) => {
+    let companyId = null;
+    const { data: existingComp } = await supabase
+      .from('companies')
+      .select('id')
+      .eq('name', company)
+      .single();
+      
+    if (existingComp) {
+      companyId = existingComp.id;
+    } else {
+      const { data: newComp } = await supabase
+        .from('companies')
+        .insert({
+          name: company,
+          domain: email.split('@')[1] || 'generic.com',
+          sla_hours: 24
+        })
+        .select('id')
+        .single();
+      if (newComp) {
+        companyId = newComp.id;
+      }
+    }
+    
+    const newUserId = crypto.randomUUID ? crypto.randomUUID() : '00000000-0000-0000-0000-' + Math.floor(Math.random() * 1000000000000).toString().padStart(12, '0');
+    const { error } = await supabase.from('profiles').insert({
+      id: newUserId,
       name,
       email,
-      company,
       role,
+      company_id: companyId,
       status: 'Online'
-    };
-    setUsers(prev => [...prev, newUser]);
+    });
+    
+    if (error) {
+      console.error('Error creating user profile:', error);
+      return;
+    }
+    
+    fetchUsers();
   };
 
-  // Render LoginForm if no session is active
+  // Render Login screen if no authentic active session exists
   if (!session) {
     return <LoginForm onLoginSuccess={handleLoginSuccess} />;
   }
@@ -200,7 +508,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-black text-slate-100 flex flex-col font-sans selection:bg-emerald-500/30 selection:text-emerald-300">
       
-      {/* GLOBAL MANAGEMENT NAVBAR */}
+      {/* GLOBAL PRODUCTION NAVBAR */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-800 bg-zinc-950 px-4">
         <div className="flex items-center gap-3">
           <div className="h-8 w-8 rounded bg-emerald-500 flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.4)] text-black">
@@ -212,21 +520,7 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-4">
-          {/* ROLE SIMULATOR DROPDOWN */}
-          <div className="flex items-center gap-1.5 bg-zinc-900 border border-slate-800 rounded px-2.5 py-1">
-            <SlidersHorizontal className="w-3.5 h-3.5 text-emerald-400" />
-            <select
-              value={userRole}
-              onChange={handleForcedRoleChange}
-              className="bg-transparent text-[11px] font-semibold text-emerald-400 focus:outline-none cursor-pointer pr-1 font-mono"
-            >
-              <option value="usuario">USUARIO (Cliente VIP)</option>
-              <option value="soporte">SOPORTE (Técnico)</option>
-              <option value="admin">ADMIN (Mesa Central)</option>
-            </select>
-          </div>
-
-          <div className="flex items-center gap-3 border-l border-slate-850 pl-3">
+          <div className="flex items-center gap-3">
             <div className="hidden sm:block text-right">
               <p className="text-xs font-bold leading-none">{session.username}</p>
               <p className="text-[9px] text-slate-500 uppercase tracking-wider font-semibold mt-0.5">{session.company}</p>
@@ -238,7 +532,7 @@ export default function App() {
             {/* Logout button */}
             <button
               onClick={handleLogout}
-              title="Cerrar sesión simulada"
+              title="Cerrar sesión de producción"
               className="p-1 px-1.5 rounded hover:bg-zinc-850 text-slate-500 hover:text-slate-300 transition-all font-mono text-[10px] uppercase flex items-center gap-1 cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -289,17 +583,17 @@ export default function App() {
           
           <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-5 space-y-5">
             
-            {/* State Banner reminding students that everything is statefully simulated */}
-            <div className="px-4 py-2 bg-emerald-950/15 border border-emerald-900/30 rounded flex items-center justify-between text-[11px] font-mono text-emerald-400">
+            {/* Clean Production Status Banner */}
+            <div className="px-4 py-2 bg-zinc-900/40 border border-slate-800/80 rounded flex items-center justify-between text-[11px] font-mono text-emerald-400">
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                 </span>
-                <span>ENTORNO INTERACTIVO EN TIEMPO REAL (REACT STATE ENGINE)</span>
+                <span>CONECTADO AL MOTOR DE PRODUCCIÓN (SUPABASE RELATIONAL CLOUD)</span>
               </div>
-              <div className="hidden lg:flex items-center gap-3">
-                <span>RUTEADOR: {isRoundRobinActive ? 'AUTOROUTE ACTIVO' : 'ASIGNACIÓN MANUAL'}</span>
+              <div className="hidden lg:flex items-center gap-3 text-slate-500">
+                <span>RUTEADOR: {isRoundRobinActive ? 'ROUND ROBIN ACTIVO' : 'ASIGNACIÓN DE INCIDENTES MANUAL'}</span>
                 <span>|</span>
                 <span>DB SIZE: {tickets.length} RECORDS</span>
               </div>

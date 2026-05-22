@@ -17,7 +17,7 @@ export default function UserManagement({
 }: UserManagementProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRole, setFilterRole] = useState<string>('all');
-  
+
   // Form state
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -53,7 +53,7 @@ export default function UserManagement({
 
   return (
     <div className="space-y-6">
-      
+
       {/* Upper Info Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 bg-zinc-900 border border-slate-800 rounded-xl">
         <div className="flex items-center gap-3">
@@ -62,7 +62,7 @@ export default function UserManagement({
           </div>
           <div>
             <div className="text-xs font-mono text-emerald-400 uppercase tracking-widest">Panel de Control de Cuentas</div>
-            <h2 className="text-xl font-bold text-slate-100 font-mono">Simulador de Usuarios y Roles</h2>
+            <h2 className="text-xl font-bold text-slate-100 font-mono">Usuarios y Roles</h2>
           </div>
         </div>
 
@@ -164,7 +164,7 @@ export default function UserManagement({
                 className="bg-black border border-slate-850 rounded pl-8 pr-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
               />
             </div>
-            
+
             <select
               value={filterRole}
               onChange={(e) => setFilterRole(e.target.value)}
@@ -215,11 +215,10 @@ export default function UserManagement({
                       <button
                         type="button"
                         onClick={() => onUpdateUserStatus(u.id, u.status === 'Online' ? 'Offline' : 'Online')}
-                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border uppercase transition-all ${
-                          u.status === 'Online'
+                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border uppercase transition-all ${u.status === 'Online'
                             ? 'bg-emerald-950/20 text-emerald-400 border-emerald-900/60 hover:text-emerald-300 hover:border-emerald-700'
                             : 'bg-zinc-900/40 text-slate-500 border-slate-800 hover:text-slate-400'
-                        }`}
+                          }`}
                         title="Haga clic para cambiar el estado simulado (Online/Offline)"
                       >
                         <span className={`w-1.5 h-1.5 rounded-full ${u.status === 'Online' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-505 bg-slate-600'}`} />
@@ -241,13 +240,12 @@ export default function UserManagement({
                     </td>
 
                     <td className="py-3 px-2 text-right">
-                      <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded border uppercase ${
-                        u.role === 'admin'
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded border uppercase ${u.role === 'admin'
                           ? 'bg-purple-950/20 text-purple-400 border-purple-900/40'
                           : u.role === 'soporte'
-                          ? 'bg-cyan-950/20 text-cyan-400 border-cyan-900/40'
-                          : 'bg-zinc-900/40 text-slate-400 border-slate-800'
-                      }`}>
+                            ? 'bg-cyan-950/20 text-cyan-400 border-cyan-900/40'
+                            : 'bg-zinc-900/40 text-slate-400 border-slate-800'
+                        }`}>
                         {u.role === 'admin' ? (
                           <>
                             <ShieldAlert className="w-3 h-3 text-purple-400" />
@@ -277,7 +275,7 @@ export default function UserManagement({
         <div className="mt-4 p-3 bg-zinc-950/60 border border-slate-850 rounded text-slate-500 text-[11px] font-mono flex gap-2 items-start leading-relaxed">
           <HelpCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
           <span>
-            <strong>INFORMACIÓN ACADÉMICA:</strong> Al modificar el rol de un usuario en esta tabla, se actualizarán los privilegios globales del usuario de inmediato en la memoria de la aplicación. Para ver cómo cambia la interfaz, puede seleccionar dicho usuario en la pantalla de inicio o usar el ruteador / selector rápido de simulación superior "Forzar Rol" en cualquier momento.
+            <strong>CONTROL DE ACCESO:</strong> Al modificar el rol de un usuario en esta tabla, se actualizarán sus privilegios globales de inmediato en la base de datos. Los cambios tendrán efecto la próxima vez que el usuario inicie sesión o interactúe con el sistema.
           </span>
         </div>
       </div>

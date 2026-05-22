@@ -1,6 +1,7 @@
 export type UserRole = 'admin' | 'soporte' | 'usuario';
 
 export interface UserSession {
+  id?: string;
   username: string;
   email: string;
   company: string;

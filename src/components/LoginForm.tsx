@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { UserRole, UserSession } from '../types';
-import { Shield, Key, Mail, Building, LogIn, UserPlus } from 'lucide-react';
+import { UserSession } from '../types';
+import { Shield, Key, Mail, Building, LogIn, UserPlus, CheckCircle } from 'lucide-react';
+import { supabase } from '../supabase';
 
 interface LoginFormProps {
   onLoginSuccess: (session: UserSession) => void;
@@ -12,45 +13,12 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
   const [password, setPassword] = useState('');
   const [company, setCompany] = useState('');
   const [name, setName] = useState('');
-  const [selectedRole, setSelectedRole] = useState<UserRole>('usuario');
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [registrationPending, setRegistrationPending] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState('');
 
-  // Quick credentials presets for demo purposes
-  const PRESETS = [
-    {
-      label: 'Acceso Usuario Final (B2B)',
-      email: 'gastonhorvat@gmail.com',
-      company: 'Acme Corp',
-      role: 'usuario' as UserRole,
-      color: 'border-emerald-800 text-emerald-400 hover:border-emerald-400 hover:bg-emerald-950/20',
-    },
-    {
-      label: 'Acceso Técnico Soporte',
-      email: 'marta.soporte@ticketb2b.com',
-      company: 'Soporte Interno #02',
-      role: 'soporte' as UserRole,
-      color: 'border-cyan-800 text-cyan-400 hover:border-cyan-400 hover:bg-cyan-950/20',
-    },
-    {
-      label: 'Acceso Administrador IT',
-      email: 'chief.admin@ticketb2b.com',
-      company: 'Global IT Operations',
-      role: 'admin' as UserRole,
-      color: 'border-purple-800 text-purple-400 hover:border-purple-400 hover:bg-purple-950/20',
-    },
-  ];
-
-  const handlePresetSelect = (preset: typeof PRESETS[0]) => {
-    setEmail(preset.email);
-    setPassword('••••••••••••');
-    setCompany(preset.company);
-    setName(preset.role === 'usuario' ? 'Gastón Horvat' : preset.role === 'soporte' ? 'Marta (Técnico)' : 'Administrador Principal');
-    setSelectedRole(preset.role);
-    setErrorMsg('');
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -59,7 +27,7 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
       return;
     }
 
-    if (activeTab === 'login' && !password) {
+    if (!password) {
       setErrorMsg('Por favor introduce tu contraseña.');
       return;
     }
@@ -71,17 +39,85 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
 
     setIsSubmitting(true);
 
-    // Simulate short network delay for visual feedback
-    setTimeout(() => {
+    try {
+      if (activeTab === 'login') {
+        // 1. Autenticación con Supabase Auth
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) throw error;
+        if (!data.user) throw new Error('No se pudo recuperar la información del usuario.');
+
+        // 2. Handshake de Roles Relacionales
+        const { data: profile, error: profileErr } = await supabase
+          .from('profiles')
+          .select('name, role, company_id')
+          .eq('id', data.user.id)
+          .single();
+
+        if (profileErr) {
+          throw new Error('Error al obtener el perfil de usuario: ' + profileErr.message);
+        }
+
+        // 3. Extracción de Payload Seguro de Inquilino (Compañía)
+        let companyName = 'Empresa B2B';
+        if (profile.company_id) {
+          const { data: comp } = await supabase
+            .from('companies')
+            .select('name')
+            .eq('id', profile.company_id)
+            .single();
+          if (comp) {
+            companyName = comp.name;
+          }
+        }
+
+        // 4. Propagación del Estado de Producción
+        const computedSession: UserSession = {
+          id: data.user.id,
+          username: profile.name || name || email.split('@')[0],
+          email: data.user.email || email,
+          company: companyName,
+          role: profile.role,
+        };
+
+        onLoginSuccess(computedSession);
+      } else {
+        // Crear Cuenta (Registro)
+        // 1. Registro en Supabase Auth con metadata para el trigger de confirmacion
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              name: name,
+              company: company,
+            }
+          }
+        });
+
+        if (error) throw error;
+
+        // 2. El perfil se creara automaticamente via trigger cuando el usuario confirme su email.
+        //    Mostramos el mensaje de confirmacion pendiente.
+        setPendingEmail(email);
+        setRegistrationPending(true);
+      }
+    } catch (err: any) {
+      let msg = err.message || 'Ocurrió un error inesperado durante el flujo de autenticación.';
+      if (msg.toLowerCase().includes('email not confirmed')) {
+        msg = 'Debes confirmar tu correo electrónico antes de iniciar sesión. Por favor, revisa tu bandeja de entrada.';
+      } else if (msg.toLowerCase().includes('invalid login credentials')) {
+        msg = 'Credenciales de inicio de sesión inválidas. Por favor, verifica tu correo y contraseña.';
+      } else if (msg.toLowerCase().includes('user already registered')) {
+        msg = 'Este correo electrónico ya está registrado.';
+      }
+      setErrorMsg(msg);
+    } finally {
       setIsSubmitting(false);
-      const computedSession: UserSession = {
-        username: name || email.split('@')[0],
-        email: email,
-        company: company || (selectedRole === 'usuario' ? 'Empresa Asociada' : 'Global Soporte B2B'),
-        role: selectedRole,
-      };
-      onLoginSuccess(computedSession);
-    }, 700);
+    }
   };
 
   return (
@@ -100,6 +136,45 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
           Gestión de incidencias de infraestructura crítica y SLAs de contrato.
         </p>
       </div>
+
+      {/* === PANTALLA DE CONFIRMACION PENDIENTE === */}
+      {registrationPending ? (
+        <div className="w-full max-w-md bg-zinc-900/95 border border-emerald-500/30 rounded-xl shadow-[0_0_50px_rgba(16,185,129,0.05)] p-8 text-center relative overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-emerald-400 to-transparent" />
+          <div className="flex justify-center mb-5">
+            <div className="w-16 h-16 rounded-full bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-center shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+              <CheckCircle className="w-8 h-8 text-emerald-400" />
+            </div>
+          </div>
+          <h2 className="text-xl font-bold text-slate-100 mb-2">¡Cuenta creada con éxito!</h2>
+          <p className="text-slate-400 text-sm mb-4 leading-relaxed">
+            Te enviamos un email de confirmación a:
+          </p>
+          <div className="px-4 py-2.5 bg-black border border-slate-700 rounded-lg font-mono text-emerald-400 text-sm mb-5">
+            {pendingEmail}
+          </div>
+          <p className="text-slate-500 text-xs leading-relaxed mb-6">
+            Por favor revisá tu bandeja de entrada y hacé clic en el enlace de confirmación para activar tu cuenta. Una vez confirmada, podrás iniciar sesión normalmente.
+          </p>
+          <div className="p-3 bg-amber-950/20 border border-amber-800/30 rounded text-amber-400/80 text-[11px] font-mono mb-5">
+            ⚠ Tu rol de acceso será asignado por el administrador del sistema una vez que tu cuenta sea verificada.
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setRegistrationPending(false);
+              setActiveTab('login');
+              setEmail(pendingEmail);
+              setPassword('');
+              setName('');
+              setCompany('');
+            }}
+            className="w-full py-2.5 rounded font-mono text-xs uppercase tracking-wider bg-zinc-800 hover:bg-zinc-700 text-slate-300 transition-all cursor-pointer"
+          >
+            Volver al inicio de sesión
+          </button>
+        </div>
+      ) : (
 
       <div className="w-full max-w-md bg-zinc-900/95 border border-slate-800 rounded-xl shadow-[0_0_50px_rgba(16,185,129,0.02)] p-6 overflow-hidden relative">
         
@@ -142,37 +217,6 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
           </button>
         </div>
 
-        {/* Preset quick buttons */}
-        <div className="mb-6">
-          <p className="text-xs font-mono uppercase tracking-wider text-slate-500 mb-2.5">
-            Presintonías de Usuario (Demostración Rápida)
-          </p>
-          <div className="grid grid-cols-1 gap-1.5">
-            {PRESETS.map((preset, idx) => (
-              <button
-                key={idx}
-                type="button"
-                className={`w-full py-2 px-3 text-xs rounded border text-left flex items-center justify-between font-mono transition-all uppercase ${preset.color}`}
-                onClick={() => handlePresetSelect(preset)}
-              >
-                <span>{preset.label}</span>
-                <span className="text-[10px] bg-zinc-800/80 px-1.5 py-0.5 rounded ml-2">
-                  {preset.role}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="relative text-center my-4">
-          <div className="absolute inset-0 flex items-center" aria-hidden="true">
-            <div className="w-full border-t border-slate-800/80"></div>
-          </div>
-          <div className="relative flex justify-center text-xs uppercase font-mono">
-            <span className="bg-zinc-900 px-2 text-slate-500">O credenciales manuales</span>
-          </div>
-        </div>
-
         {/* Real-time interactive form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           {errorMsg && (
@@ -208,17 +252,16 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-mono uppercase text-slate-400 mb-1">Rol Simulado de Destino</label>
-                <select
-                  value={selectedRole}
-                  onChange={(e) => setSelectedRole(e.target.value as UserRole)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-sans transition-all"
-                >
-                  <option value="usuario">Cliente B2B (usuario)</option>
-                  <option value="soporte">Técnico de Soporte (soporte)</option>
-                  <option value="admin">Administrador del Sistema (admin)</option>
-                </select>
+              {/* Nota informativa sobre el correo y rol */}
+              <div className="p-3 bg-zinc-950 border border-slate-800/60 rounded text-[11px] font-mono text-slate-400 space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="text-emerald-500 mt-0.5">✉</span>
+                  <span><strong>Confirmación por Correo:</strong> Se enviará un email para verificar tu cuenta. Deberás confirmarlo antes de poder iniciar sesión.</span>
+                </div>
+                <div className="flex items-start gap-2 border-t border-slate-800/40 pt-2">
+                  <span className="text-emerald-500 mt-0.5">👤</span>
+                  <span><strong>Asignación de Rol:</strong> Tu rol de acceso será asignado por el administrador tras la verificación.</span>
+                </div>
               </div>
             </>
           )}
@@ -273,19 +316,20 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
             ) : (
               <>
                 <UserPlus className="w-4 h-4" />
-                <span>Crear y Autenticar</span>
+                <span>Registrar Cuenta y Enviar Confirmación</span>
               </>
             )}
           </button>
         </form>
 
-        {/* Footer info indicating 100% Client-Side Simulation */}
+        {/* Footer info indicating Secure Enterprise Auth */}
         <div className="mt-6 pt-4 border-t border-slate-800/80 text-center">
           <p className="text-[11px] font-mono text-slate-600 uppercase">
-            ESTADO CORPORATIVO RESGUARDADO | CONTROL FRONTEND LOCAL
+            CONEXIÓN DIRECTA CON EL MOTOR DE AUTENTICACIÓN DE SUPABASE
           </p>
         </div>
       </div>
+      )}
     </div>
   );
 }
